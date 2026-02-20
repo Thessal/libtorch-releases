@@ -28,15 +28,22 @@ jobs:
       - name: Package libtorch
         run: |
           TORCH_DIR=$(python3 -c "import torch; print(torch.__path__[0])")
-          TORCH_LIBS="$TORCH_DIR/../torch.libs"
+          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
           mkdir -p libtorch
           cp -r "$TORCH_DIR/lib" libtorch/
           cp -r "$TORCH_DIR/include" libtorch/ 2>/dev/null || true
           cp -r "$TORCH_DIR/share" libtorch/ 2>/dev/null || true
-          # Copy bundled shared libs (OpenBLAS, gomp, ARM Compute Library)
-          if [ -d "$TORCH_LIBS" ]; then
-            cp "$TORCH_LIBS"/*.so* libtorch/lib/ 2>/dev/null || true
-          fi
+          # Copy ALL vendored .so files from torch.libs/ and nvidia dirs
+          for dir in "$SITE_PACKAGES"/torch.libs "$TORCH_DIR/../torch.libs"; do
+            if [ -d "$dir" ]; then
+              echo "Copying from $dir:"
+              ls "$dir"
+              cp "$dir"/*.so* libtorch/lib/ 2>/dev/null || true
+            fi
+          done
+          echo "=== Final libtorch/lib contents ==="
+          ls -la libtorch/lib/ | grep -i gfortran || echo "No libgfortran found"
+          ls libtorch/lib/ | wc -l
           tar czf "libtorch-cxx11-abi-aarch64-${{ inputs.torch_version }}.tar.gz" libtorch
 
       - name: Create release and upload
