@@ -1,0 +1,103 @@
+name: Build libtorch x86_64 CUDA
+
+on:
+  workflow_dispatch:
+    inputs:
+      torch_version:
+        description: "PyTorch version (e.g. 2.7.1)"
+        required: true
+        default: "2.7.1"
+      cuda_version:
+        description: "CUDA version tag (e.g. cu126, cu128). See https://download.pytorch.org/whl/"
+        required: true
+        default: "cu126"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      TORCH_VERSION: ${{ inputs.torch_version }}
+      CUDA_TAG: ${{ inputs.cuda_version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyTorch with CUDA
+        run: |
+          pip install "torch==${TORCH_VERSION}" \
+            --index-url "https://download.pytorch.org/whl/${CUDA_TAG}"
+          # Verify CUDA build
+          python3 -c "import torch; assert torch.version.cuda is not None, 'CPU-only build'; print(f'CUDA {torch.version.cuda} verified')"
+
+      - name: Package libtorch
+        run: |
+          TORCH_DIR=$(python3 -c "import torch; print(torch.__path__[0])")
+          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+
+          mkdir -p libtorch
+          cp -r "$TORCH_DIR/lib" libtorch/
+          cp -r "$TORCH_DIR/include" libtorch/ 2>/dev/null || true
+          cp -r "$TORCH_DIR/share" libtorch/ 2>/dev/null || true
+
+          # Vendored .so files from torch.libs/
+          for dir in "$SITE_PACKAGES"/torch.libs "$TORCH_DIR/../torch.libs"; do
+            if [ -d "$dir" ]; then
+              echo "Copying from $dir"
+              cp "$dir"/*.so* libtorch/lib/ 2>/dev/null || true
+            fi
+          done
+
+          # NVIDIA runtime libs bundled by pip (cublas, cudnn, cufft, etc.)
+          NVIDIA_COUNT=0
+          for dir in "$SITE_PACKAGES"/nvidia/*/lib; do
+            if [ -d "$dir" ]; then
+              echo "Copying NVIDIA libs from $dir"
+              cp "$dir"/*.so* libtorch/lib/ 2>/dev/null || true
+              NVIDIA_COUNT=$((NVIDIA_COUNT + 1))
+            fi
+          done
+          echo "Copied from $NVIDIA_COUNT NVIDIA lib directories"
+
+          echo "=== Verify key CUDA runtime libs ==="
+          for lib in libcudart libcublas libcudnn libcufft libcusolver libcusparse libnvrtc libnvJitLink; do
+            if ls libtorch/lib/${lib}*.so* 2>/dev/null | head -1; then
+              echo "OK: ${lib}"
+            else
+              echo "WARNING: ${lib} not found"
+            fi
+          done
+
+          echo "=== Total .so files ==="
+          ls libtorch/lib/*.so* 2>/dev/null | wc -l
+
+          CUDA_DOT=${CUDA_TAG#cu}
+          CUDA_DOT="${CUDA_DOT:0:2}.${CUDA_DOT:2}"
+          tar czf "libtorch-cxx11-abi-x86_64-cuda${CUDA_DOT}-${TORCH_VERSION}.tar.gz" libtorch
+
+      - name: Create release and upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${TORCH_VERSION}"
+          CUDA_DOT=${CUDA_TAG#cu}
+          CUDA_DOT="${CUDA_DOT:0:2}.${CUDA_DOT:2}"
+          ASSET="libtorch-cxx11-abi-x86_64-cuda${CUDA_DOT}-${TORCH_VERSION}.tar.gz"
+          gh release create "$TAG" \
+            --title "Libtorch v${TORCH_VERSION}" \
+            --notes "Pre-built libtorch ${TORCH_VERSION} with CUDA ${CUDA_DOT} for Linux x86_64." \
+            "$ASSET" || \
+          gh release upload "$TAG" "$ASSET" --clobber

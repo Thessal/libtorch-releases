@@ -1,0 +1,68 @@
+name: Build libtorch x86_64 CPU
+
+on:
+  workflow_dispatch:
+    inputs:
+      torch_version:
+        description: "PyTorch version to package"
+        required: true
+        default: "2.7.1"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyTorch (CPU only)
+        run: |
+          pip install "torch==${{ inputs.torch_version }}" \
+            --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Package libtorch
+        run: |
+          TORCH_DIR=$(python3 -c "import torch; print(torch.__path__[0])")
+          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+
+          # Verify this is a CPU-only build
+          python3 -c "import torch; assert torch.version.cuda is None, f'Expected CPU build, got CUDA {torch.version.cuda}'; print('CPU-only build verified')"
+
+          mkdir -p libtorch
+          cp -r "$TORCH_DIR/lib" libtorch/
+          cp -r "$TORCH_DIR/include" libtorch/ 2>/dev/null || true
+          cp -r "$TORCH_DIR/share" libtorch/ 2>/dev/null || true
+
+          # Copy vendored .so files from torch.libs/
+          for dir in "$SITE_PACKAGES"/torch.libs "$TORCH_DIR/../torch.libs"; do
+            if [ -d "$dir" ]; then
+              echo "Copying from $dir"
+              cp "$dir"/*.so* libtorch/lib/ 2>/dev/null || true
+            fi
+          done
+
+          echo "=== libtorch/lib contents ==="
+          ls libtorch/lib/*.so* 2>/dev/null | wc -l
+          echo "=== Checking for unexpected CUDA libs ==="
+          ls libtorch/lib/*cuda* 2>/dev/null && echo "WARNING: CUDA libs in CPU build" || echo "OK: No CUDA libs"
+
+          tar czf "libtorch-cxx11-abi-x86_64-cpu-${{ inputs.torch_version }}.tar.gz" libtorch
+
+      - name: Create release and upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ inputs.torch_version }}"
+          ASSET="libtorch-cxx11-abi-x86_64-cpu-${{ inputs.torch_version }}.tar.gz"
+          gh release create "$TAG" \
+            --title "Libtorch v${{ inputs.torch_version }}" \
+            --notes "Pre-built libtorch ${{ inputs.torch_version }} for Linux x86_64." \
+            "$ASSET" || \
+          gh release upload "$TAG" "$ASSET" --clobber
