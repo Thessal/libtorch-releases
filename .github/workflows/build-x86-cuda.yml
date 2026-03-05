@@ -53,31 +53,11 @@ jobs:
           cp -r "$TORCH_DIR/include" libtorch/ 2>/dev/null || true
           cp -r "$TORCH_DIR/share" libtorch/ 2>/dev/null || true
 
-          # Vendored .so files from torch.libs/
+          # Vendored .so files from torch.libs/ (excludes NVIDIA runtime libs — user provides system CUDA)
           for dir in "$SITE_PACKAGES"/torch.libs "$TORCH_DIR/../torch.libs"; do
             if [ -d "$dir" ]; then
               echo "Copying from $dir"
               cp "$dir"/*.so* libtorch/lib/ 2>/dev/null || true
-            fi
-          done
-
-          # NVIDIA runtime libs bundled by pip (cublas, cudnn, cufft, etc.)
-          NVIDIA_COUNT=0
-          for dir in "$SITE_PACKAGES"/nvidia/*/lib; do
-            if [ -d "$dir" ]; then
-              echo "Copying NVIDIA libs from $dir"
-              cp "$dir"/*.so* libtorch/lib/ 2>/dev/null || true
-              NVIDIA_COUNT=$((NVIDIA_COUNT + 1))
-            fi
-          done
-          echo "Copied from $NVIDIA_COUNT NVIDIA lib directories"
-
-          echo "=== Verify key CUDA runtime libs ==="
-          for lib in libcudart libcublas libcudnn libcufft libcusolver libcusparse libnvrtc libnvJitLink; do
-            if ls libtorch/lib/${lib}*.so* 2>/dev/null | head -1; then
-              echo "OK: ${lib}"
-            else
-              echo "WARNING: ${lib} not found"
             fi
           done
 
