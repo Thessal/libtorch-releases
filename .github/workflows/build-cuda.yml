@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       torch_version:
-        description: "PyTorch version (e.g. 2.4.0)"
+        description: "PyTorch version (e.g. 2.7.1)"
         required: true
         default: "2.7.1"
       cuda_version:
@@ -38,25 +38,76 @@ jobs:
 
       - name: Add swap space
         run: |
+          sudo swapoff -a
+          sudo rm -f /swapfile
           sudo fallocate -l 8G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ── Fast path: try to get a pre-built CUDA wheel ──
+
+      - name: Try installing PyTorch CUDA from pip
+        id: pip_install
+        continue-on-error: true
+        run: |
+          CUDA_TAG="cu${CUDA_VERSION//-/}"
+          echo "Trying PyTorch index for ${CUDA_TAG}..."
+          pip install "torch==${TORCH_VERSION}" \
+            --index-url "https://download.pytorch.org/whl/${CUDA_TAG}" || \
+          pip install "torch==${TORCH_VERSION}" \
+            --extra-index-url "https://pypi.nvidia.com" || \
+          exit 1
+          # Verify this is actually a CUDA build, not CPU-only
+          python3 -c "import torch; assert torch.version.cuda is not None, 'CPU-only build'; print(f'CUDA {torch.version.cuda} verified')"
+
+      - name: Extract libtorch from pip install
+        if: steps.pip_install.outcome == 'success'
+        run: |
+          TORCH_DIR=$(python3 -c "import torch; print(torch.__path__[0])")
+          SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+          mkdir -p libtorch
+          cp -r "$TORCH_DIR/lib" libtorch/
+          cp -r "$TORCH_DIR/include" libtorch/ 2>/dev/null || true
+          cp -r "$TORCH_DIR/share" libtorch/ 2>/dev/null || true
+          # Vendored .so files
+          for dir in "$SITE_PACKAGES"/torch.libs "$TORCH_DIR/../torch.libs"; do
+            if [ -d "$dir" ]; then
+              echo "Copying from $dir"
+              cp "$dir"/*.so* libtorch/lib/ 2>/dev/null || true
+            fi
+          done
+          # NVIDIA libs bundled by pip (cublas, cudnn, etc.)
+          for dir in "$SITE_PACKAGES"/nvidia/*/lib; do
+            if [ -d "$dir" ]; then
+              echo "Copying NVIDIA libs from $dir"
+              cp "$dir"/*.so* libtorch/lib/ 2>/dev/null || true
+            fi
+          done
+
+      # ── Slow path: build from source ──
+
       - name: Install system dependencies
+        if: steps.pip_install.outcome != 'success'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build git \
-            python3 python3-pip python3-dev \
-            libopenblas-dev liblapack-dev
+            python3-dev libopenblas-dev liblapack-dev
 
       - name: Install Python build dependencies
+        if: steps.pip_install.outcome != 'success'
         run: |
           pip install pyyaml typing_extensions numpy setuptools wheel
 
       - name: Install CUDA toolkit
+        if: steps.pip_install.outcome != 'success'
         run: |
           wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
@@ -64,21 +115,23 @@ jobs:
           sudo apt-get install -y cuda-toolkit-${CUDA_VERSION}
           echo "/usr/local/cuda/bin" >> "$GITHUB_PATH"
           echo "CUDA_HOME=/usr/local/cuda" >> "$GITHUB_ENV"
-          # Verify
           /usr/local/cuda/bin/nvcc --version
 
       - name: Install cuDNN
+        if: steps.pip_install.outcome != 'success'
         run: |
           CUDA_MAJOR=${CUDA_VERSION%%-*}
           sudo apt-get install -y libcudnn9-dev-cuda-${CUDA_MAJOR}
 
       - name: Clone PyTorch
+        if: steps.pip_install.outcome != 'success'
         run: |
           git clone --branch "v${TORCH_VERSION}" --depth 1 \
             --recurse-submodules --shallow-submodules \
             https://github.com/pytorch/pytorch.git
 
-      - name: Build libtorch
+      - name: Build libtorch from source
+        if: steps.pip_install.outcome != 'success'
         run: |
           cd pytorch
           mkdir build && cd build
@@ -94,15 +147,14 @@ jobs:
             ..
           # Limit parallelism to avoid OOM on ARM runners
           ninja -j$(( $(nproc) > 4 ? 4 : $(nproc) ))
-
-      - name: Install and package
-        run: |
-          cd pytorch/build
           ninja install
           cd ../..
           mv pytorch/install libtorch
 
-          # Sanity checks
+      # ── Common: verify, package, release ──
+
+      - name: Verify and package
+        run: |
           echo "=== Verifying libtorch ==="
           for lib in libtorch.so libc10.so libc10_cuda.so; do
             if [ -f "libtorch/lib/$lib" ]; then
