@@ -53,14 +53,14 @@ jobs:
           echo "=== Checking for unexpected CUDA libs ==="
           ls libtorch/lib/*cuda* 2>/dev/null && echo "WARNING: CUDA libs in CPU build" || echo "OK: No CUDA libs"
 
-          tar czf "libtorch-cxx11-abi-x86_64-cpu-${{ inputs.torch_version }}.tar.gz" libtorch
+          tar czf "libtorch-cxx11-abi-x86_64-${{ inputs.torch_version }}.tar.gz" libtorch
 
       - name: Create release and upload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="v${{ inputs.torch_version }}"
-          ASSET="libtorch-cxx11-abi-x86_64-cpu-${{ inputs.torch_version }}.tar.gz"
+          ASSET="libtorch-cxx11-abi-x86_64-${{ inputs.torch_version }}.tar.gz"
           gh release create "$TAG" \
             --title "Libtorch v${{ inputs.torch_version }}" \
             --notes "Pre-built libtorch ${{ inputs.torch_version }} for Linux x86_64." \
