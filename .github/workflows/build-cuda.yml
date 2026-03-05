@@ -59,10 +59,11 @@ jobs:
         run: |
           CUDA_TAG="cu${CUDA_VERSION//-/}"
           echo "Trying PyTorch index for ${CUDA_TAG}..."
+          # Use --index-url (not --extra-index-url) so pip does NOT fall back to PyPI
           pip install "torch==${TORCH_VERSION}" \
             --index-url "https://download.pytorch.org/whl/${CUDA_TAG}" || \
           pip install "torch==${TORCH_VERSION}" \
-            --extra-index-url "https://pypi.nvidia.com" || \
+            --index-url "https://pypi.nvidia.com" || \
           exit 1
           # Verify this is actually a CUDA build, not CPU-only
           python3 -c "import torch; assert torch.version.cuda is not None, 'CPU-only build'; print(f'CUDA {torch.version.cuda} verified')"
