@@ -1,4 +1,4 @@
-name: Build libtorch aarch64 CUDA (Jetson)
+name: Build libtorch aarch64 CUDA (DGX spark)
 
 on:
   workflow_dispatch:
