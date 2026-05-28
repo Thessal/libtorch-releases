@@ -6,7 +6,7 @@ on:
       torch_version:
         description: "PyTorch version to package"
         required: true
-        default: "2.10.0"
+        default: "2.9.0"
 
 permissions:
   contents: write
