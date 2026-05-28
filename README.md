@@ -18,3 +18,9 @@ This repository exists to host Linux Arm64 (aarch64) libtorch builds. The offici
 - Attach the archive when creating the release for the corresponding tag, and clearly note the PyTorch commit/version used.
 
 If upstream PyTorch starts shipping Linux Arm64 libtorch archives, we can retire this repository.
+
+## Useful links 
+- Pytorch versions : https://pytorch.org/get-started/previous-versions/
+- ubuntu version : lsb_release -a
+- cuda version : nvidia-smi
+- cuda_arch : https://developer.nvidia.com/cuda/gpus
