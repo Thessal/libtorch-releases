@@ -64,6 +64,10 @@ jobs:
           echo "=== Total .so files ==="
           ls libtorch/lib/*.so* 2>/dev/null | wc -l
 
+          # Strip debug symbols to reduce package size below the GitHub Release 2GB limit
+          echo "=== Stripping debug symbols ==="
+          find libtorch -type f -name "*.so*" -exec strip --strip-unneeded {} +
+
           CUDA_DOT=${CUDA_TAG#cu}
           CUDA_DOT="${CUDA_DOT:0:2}.${CUDA_DOT:2}"
           tar czf "libtorch-cxx11-abi-x86_64-cuda${CUDA_DOT}-${TORCH_VERSION}.tar.gz" libtorch

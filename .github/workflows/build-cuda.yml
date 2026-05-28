@@ -167,6 +167,10 @@ jobs:
           echo "Total libs: $(ls libtorch/lib/*.so* 2>/dev/null | wc -l)"
           ls libtorch/include/ 2>/dev/null && echo "OK: include dir present" || echo "WARNING: no include dir"
 
+          # Strip debug symbols to reduce package size below the GitHub Release 2GB limit
+          echo "=== Stripping debug symbols ==="
+          find libtorch -type f -name "*.so*" -exec strip --strip-unneeded {} +
+
           CUDA_DOT=${CUDA_VERSION//-/.}
           tar czf "libtorch-cxx11-abi-aarch64-cuda${CUDA_DOT}-${TORCH_VERSION}.tar.gz" libtorch
 
