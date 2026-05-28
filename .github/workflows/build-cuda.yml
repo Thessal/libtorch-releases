@@ -172,7 +172,19 @@ jobs:
           find libtorch -type f -name "*.so*" -exec strip --strip-unneeded {} +
 
           CUDA_DOT=${CUDA_VERSION//-/.}
-          tar czf "libtorch-cxx11-abi-aarch64-cuda${CUDA_DOT}-${TORCH_VERSION}.tar.gz" libtorch
+          ASSET="libtorch-cxx11-abi-aarch64-cuda${CUDA_DOT}-${TORCH_VERSION}.tar.gz"
+          tar czf "$ASSET" libtorch
+
+          echo "=== Size after compression ==="
+          ls -lh "$ASSET"
+
+          echo "=== Splitting archive into 1.5GB parts ==="
+          split -b 1500M "$ASSET" "${ASSET}.part-"
+          echo "=== Split parts ==="
+          ls -lh "${ASSET}.part-"*
+
+          # Remove the huge single file to save runner disk space
+          rm "$ASSET"
 
       - name: Create release and upload
         env:
@@ -181,8 +193,11 @@ jobs:
           TAG="v${TORCH_VERSION}"
           CUDA_DOT=${CUDA_VERSION//-/.}
           ASSET="libtorch-cxx11-abi-aarch64-cuda${CUDA_DOT}-${TORCH_VERSION}.tar.gz"
+          
+          # Create release if it does not exist
           gh release create "$TAG" \
             --title "Libtorch aarch64 v${TORCH_VERSION}" \
-            --notes "Pre-built libtorch ${TORCH_VERSION} with CUDA ${CUDA_DOT} for Linux aarch64 (Jetson)." \
-            "$ASSET" || \
-          gh release upload "$TAG" "$ASSET" --clobber
+            --notes "Pre-built libtorch ${TORCH_VERSION} with CUDA ${CUDA_DOT} for Linux aarch64 (Jetson). To extract, download all parts and run: 'cat ${ASSET}.part-* > ${ASSET} && tar -xzf ${ASSET}'" || true
+
+          # Upload split parts
+          gh release upload "$TAG" ${ASSET}.part-* --clobber
